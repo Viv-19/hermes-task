@@ -13,7 +13,19 @@ Every email goes through the same steps:
 ```mermaid
 flowchart TD
     A(["Customer email<br/>subject and body"]) --> B["Router agent<br/>picks one of six categories"]
-    B --> C["Skill loaded<br/>only that category's Markdown file"]
+    B --> S1["freight_quotation.md"]
+    B --> S2["shipment_status.md"]
+    B --> S3["documentation.md"]
+    B --> S4["payment.md"]
+    B --> S5["general_business_email.md"]
+    B --> S6["other.md"]
+    SH["_shared/ambiguity.md<br/>how to read unclear wording"] -.-> D
+    S1 --> C["Skill loaded<br/>only the chosen category's file"]
+    S2 --> C
+    S3 --> C
+    S4 --> C
+    S5 --> C
+    S6 --> C
     C --> D["Skill agent<br/>extracts the details and drafts a reply"]
     D --> E["Python validation<br/>checks quotes, mode, missing details and the draft"]
     E --> F["Draft ready"]
@@ -31,11 +43,13 @@ flowchart TD
     classDef fail fill:#fde8e6,stroke:#b42318,color:#16181d
     class B,D ai
     class C,E code
+    class S1,S2,S3,S4,S5,S6,SH skill
+    classDef skill fill:#fff,stroke:#b98a2e,stroke-dasharray:4 3,color:#16181d
     class G,H,I human
     class X fail
 ```
 
-Gold steps use AI, blue steps are plain Python code, and green steps are done by a person.
+Gold steps use AI, blue steps are plain Python code, and green steps are done by a person. Dashed boxes are the six skill files; the router sees only their one-line descriptions, and only the chosen one is loaded.
 
 1. **Router agent** reads a short description of each category and picks one: Freight Quotation Enquiry, Shipment Status, Documentation, Payment, General Business Email, or Other.
 2. **Skill agent** loads only that category's instructions (a Markdown file in `skills/`), extracts the details and drafts the reply. Every skill also gets a shared playbook, `skills/_shared/ambiguity.md`, on how to read unclear wording, and each skill has worked examples.
