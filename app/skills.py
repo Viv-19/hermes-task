@@ -90,7 +90,7 @@ Dear <the sender's first name if the email is signed with a name, otherwise "Cus
 
 <one or two sentences thanking them and restating what they already gave>
 
-<only if details are missing:> To help us proceed, could you please confirm:
+<ONLY if details are missing or unclear — if nothing is missing, leave this whole list out, never write "None":> To help us proceed, could you please confirm:
 - <one missing detail per line>
 - <...>
 

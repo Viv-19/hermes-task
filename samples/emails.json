@@ -126,6 +126,41 @@
     "body": "Please resend the BL, the earlier one had a mistake. Also need the packing list for the Rotterdam shipment, urgently.\n\nPooja"
   },
   {
+    "id": "c1",
+    "group": "edge",
+    "label": "COMPLETE: freight (air)",
+    "subject": "Air freight quotation – Pune to Rotterdam",
+    "body": "Dear Hermes Team,\n\nPlease quote air freight for the following shipment:\n- Origin: Pune, India\n- Destination: Rotterdam, Netherlands\n- Commodity: Precision-machined aluminium components\n- Gross weight: 320 kg\n- Packages: 8 wooden crates\n- Dimensions per crate: 80 x 60 x 55 cm\n- Incoterm: EXW Pune\n- Cargo-ready date: 28 October 2026\n\nRegards,\nRohit Mehra\nSupply Chain Manager"
+  },
+  {
+    "id": "c2",
+    "group": "edge",
+    "label": "COMPLETE: freight (ocean, FCL)",
+    "subject": "FCL quotation – Nhava Sheva to Hamburg",
+    "body": "Dear Hermes Team,\n\nPlease quote sea freight for one 40HC container from Nhava Sheva to Hamburg.\n- Commodity: Cotton garments\n- Gross cargo weight: 18,500 kg\n- Incoterm: FOB Nhava Sheva\n- Cargo-ready date: 5 November 2026\n\nRegards,\nMeera Joshi\nExport Manager"
+  },
+  {
+    "id": "c3",
+    "group": "edge",
+    "label": "COMPLETE: shipment status",
+    "subject": "Status of AWB 176-12345675",
+    "body": "Hello Hermes Team,\n\nCould you please share the current status of our air shipment with AWB number 176-12345675 from Pune to Rotterdam?\n\nThank you,\nAnita Rao\nLogistics Coordinator"
+  },
+  {
+    "id": "c4",
+    "group": "edge",
+    "label": "COMPLETE: payment",
+    "subject": "Payment confirmation for invoice INV-2026-0457",
+    "body": "Dear Hermes Accounts Team,\n\nWe have paid invoice INV-2026-0457 for USD 4,250.00 on 12 October 2026 by bank transfer, reference UTR 4567890123. Please confirm that the payment has been received.\n\nRegards,\nImran Shah\nFinance Manager"
+  },
+  {
+    "id": "c5",
+    "group": "edge",
+    "label": "COMPLETE: documentation",
+    "subject": "Request for Bill of Lading – HLCU1234567",
+    "body": "Hello Team,\n\nPlease share the final Bill of Lading for our shipment, booking number HLCU1234567 (Nhava Sheva to Hamburg).\n\nThanks,\nPriya Nair"
+  },
+  {
     "id": "e9",
     "group": "edge",
     "label": "General business email",

@@ -248,6 +248,54 @@ def test_a_draft_that_promises_to_read_an_attachment_is_replaced():
     assert "DRAFT_CONTAINS_UNSUPPORTED_CLAIM" in result["flags"]
 
 
+# ---------------------------------------------------------------- the draft guard on complete emails
+
+PAYMENT_EMAIL = (
+    "We have paid invoice INV-2026-0457 for USD 4,250.00 on 12 October 2026 by bank transfer, "
+    "reference UTR 4567890123. Please confirm that the payment has been received.\n\nRegards,\nImran Shah"
+)
+
+
+def payment(draft_body):
+    raw = {
+        "category": S.PAYMENT,
+        "fields": {
+            "invoice_number": f("INV-2026-0457", "invoice INV-2026-0457"),
+            "amount": f("4,250.00", "USD 4,250.00", "USD"),
+        },
+        "draft_reply": {"subject": "Re", "body": draft_body},
+    }
+    return V.build_result("Payment confirmation", PAYMENT_EMAIL, raw, today=TODAY)
+
+
+def test_a_payment_reply_may_repeat_the_customers_own_amount():
+    draft = ("Dear Customer,\n\nThank you for your email about invoice INV-2026-0457 for USD 4,250.00.\n\n"
+             "We will verify the transaction with our accounts team." + SIGN)
+    result = payment(draft)
+    assert result["draft_reply"]["source"] == "ai"
+    assert "DRAFT_CONTAINS_UNSUPPORTED_CLAIM" not in result["flags"]
+
+
+def test_a_payment_reply_may_not_state_a_different_amount():
+    result = payment("Dear Customer,\n\nWe received USD 9,999.00 from you." + SIGN)
+    assert result["draft_reply"]["source"] == "template"
+    assert "9,999" not in result["draft_reply"]["body"]
+
+
+def test_a_freight_reply_may_not_repeat_a_price_even_if_the_customer_wrote_it():
+    text = CALM + " Our budget is USD 3 per kg."
+    draft = "Dear Customer,\n\nWe can do it at USD 3 per kg." + SIGN
+    result = build(text, freight(CALM_FIELDS, draft))
+    assert result["draft_reply"]["source"] == "template"  # agreeing to a price is a commitment
+
+
+def test_a_reply_that_asks_for_none_is_replaced():
+    draft = "Dear Customer,\n\nThanks.\n\nTo help us proceed, could you please confirm:\n- None\n\nWe will verify this." + SIGN
+    result = payment(draft)
+    assert result["draft_reply"]["source"] == "template"
+    assert "None" not in result["draft_reply"]["body"]
+
+
 # ---------------------------------------------------------------- the skills themselves
 
 

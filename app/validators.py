@@ -641,10 +641,38 @@ def _ask_name(category: str, item: dict) -> str:
     return S.field_label(category, item["field"])
 
 
-def _draft_problems(body: str, missing: list[dict], category: str) -> list[str]:
+def _amount(text: str) -> str | None:
+    """First number in `text`, normalised so that 4,250.00 and 4250 are the same."""
+    match = re.search(r"\d[\d,]*(?:\.\d+)?", text)
+    if not match:
+        return None
+    number = match.group(0).replace(",", "")
+    return number.rstrip("0").rstrip(".") if "." in number else number
+
+
+def _has_invented_price(body: str, email_text: str, echo_ok: bool) -> bool:
+    """A price in a reply is only acceptable if the customer wrote that very amount (payment replies repeat it)."""
+    matches = list(PRICE_RE.finditer(body))
+    if not matches:
+        return False
+    if not echo_ok:
+        return True
+    known = {_amount(email_text[m.start() : m.end() + 15]) for m in PRICE_RE.finditer(email_text)}
+    known.discard(None)
+    return any(_amount(body[m.start() : m.end() + 15]) not in known for m in matches)
+
+
+# a question list that asks for nothing: "- None", "- N/A"
+EMPTY_ASK_RE = re.compile(r"^\s*[-•*]\s*(?:none|n/?a|nil|nothing)\.?\s*$", re.I | re.M)
+
+
+def _draft_problems(body: str, missing: list[dict], category: str, email_text: str = "") -> list[str]:
     problems = []
-    if PRICE_RE.search(body):
+    # Freight and everything else: no price at all. Payment replies may repeat the customer's own amount.
+    if _has_invented_price(body, email_text, echo_ok=(category == S.PAYMENT)):
         problems.append("it contained a price or rate")
+    if EMPTY_ASK_RE.search(body):
+        problems.append("it listed “None” as the thing to confirm")
     if TRANSIT_RE.search(body):
         problems.append("it promised a transit or delivery time")
     if ATTACH_RE.search(body):
@@ -954,7 +982,7 @@ def build_result(subject: str, body: str, raw: dict, today: date | None = None) 
     elif action == "NO_REPLY_NEEDED" and not draft_body:
         draft = {"subject": "", "body": "", "source": "none", "notes": ["The model judged that no reply is needed."]}
     else:
-        problems = _draft_problems(draft_body, missing, category) if draft_body else []
+        problems = _draft_problems(draft_body, missing, category, text) if draft_body else []
         if not draft_body or problems:
             if problems and any(not p.startswith("it did not ask") for p in problems):
                 flags.add("DRAFT_CONTAINS_UNSUPPORTED_CLAIM")

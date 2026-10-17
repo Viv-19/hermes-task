@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / ".env")
 
-VERSION = "3.1"
+VERSION = "3.2"
 
 # Free models first. The two paid ones (about $0.001 and $0.005 per email) are the safety net:
 # they are only reached when the free models are busy or the free daily limit is used up.
