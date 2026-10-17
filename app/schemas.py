@@ -22,7 +22,9 @@ ACTIONS = [
 
 # Flags the model may raise itself, and flags only the Python checks raise.
 LLM_FLAGS = {"SUSPICIOUS", "PROMPT_INJECTION", "MIXED_INTENT"}
-PYTHON_FLAGS = {"INCOTERM_MODE_MISMATCH", "PAST_DATE", "DRAFT_CONTAINS_UNSUPPORTED_CLAIM"}
+PYTHON_FLAGS = {
+    "INCOTERM_MODE_MISMATCH", "PAST_DATE", "DRAFT_CONTAINS_UNSUPPORTED_CLAIM", "MULTIPLE_SHIPMENTS", "ATTACHMENT_REFERENCED",
+}
 
 # category -> [(field name, label shown in the UI, phrase used when asking the customer for it)]
 FIELDS = {
@@ -102,6 +104,8 @@ SHORT_LABEL = {
     "shipment_type": "FCL or LCL",
     "container_type": "container type",
     "cargo_ready_date_exact": "exact ready date",
+    "which_shipment": "which shipment",
+    "attachment_details": "attachment details",
 }
 
 

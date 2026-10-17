@@ -20,7 +20,7 @@ def collect(subject, body, **kw):
 
 def names(events):
     """Workflow step events only (model_try / model_fail / ping are reported separately)."""
-    return [e["event"] for e in events if e["event"] not in ("ping", "model_try", "model_fail")]
+    return [e["event"] for e in events if e["event"] not in ("ping", "model_try", "model_fail", "model_skip")]
 
 
 def test_mock_workflow_emits_every_step_in_order():

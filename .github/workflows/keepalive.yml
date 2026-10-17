@@ -1,0 +1,29 @@
+name: Keep alive
+
+# Free Render services go to sleep after about 15 minutes without visitors and need about a minute
+# to wake up. This pings the site every 10 minutes so it is awake when someone opens it.
+# To stop it: delete this file (or disable the workflow in the Actions tab).
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  ping:
+    name: Ping the site
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Call /api/health
+        env:
+          APP_URL: ${{ vars.RENDER_URL }}
+        run: |
+          if [ -z "$APP_URL" ]; then
+            echo "::notice::Repository variable RENDER_URL is not set, nothing to ping."
+            exit 0
+          fi
+          curl -fsS --retry 3 --retry-delay 20 --max-time 60 "${APP_URL%/}/api/health" | head -c 300
+          echo

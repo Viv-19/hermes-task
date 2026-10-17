@@ -38,7 +38,7 @@ flowchart TD
 Gold steps use AI, blue steps are plain Python code, and green steps are done by a person.
 
 1. **Router agent** reads a short description of each category and picks one: Freight Quotation Enquiry, Shipment Status, Documentation, Payment, General Business Email, or Other.
-2. **Skill agent** loads only that category's instructions (a Markdown file in `skills/`), extracts the details and drafts the reply.
+2. **Skill agent** loads only that category's instructions (a Markdown file in `skills/`), extracts the details and drafts the reply. Every skill also gets a shared playbook, `skills/_shared/ambiguity.md`, on how to read unclear wording, and each skill has worked examples.
 3. **Validation** is plain Python, with no AI, and runs before anyone sees the result:
    - Every detail must be backed by a quote that really appears in the email.
    - AIR or OCEAN is set only from clear words such as "air freight", "FCL" or "40HC". It is never guessed from the route.
@@ -48,14 +48,26 @@ Gold steps use AI, blue steps are plain Python code, and green steps are done by
    - Text inside an email that tries to give instructions to the AI is ignored and flagged.
 4. **A person approves or rejects** the draft.
 
-**Models.** The AI runs on free [OpenRouter](https://openrouter.ai) models, tried in this order: `nvidia/nemotron-3-ultra-550b-a55b`, `nvidia/nemotron-3-super-120b-a12b`, `google/gemma-4-31b-it`, `nvidia/nemotron-3.5-super-vl`. If one is busy or fails, the next is used. If all of them fail, the app shows **"OpenRouter API is not working"**.
+**Models.** The AI runs on [OpenRouter](https://openrouter.ai), tried in this order:
+
+1. `nemotron-3-ultra-550b-a55b` (free)
+2. `nemotron-3-super-120b-a12b` (free)
+3. `nemotron-3-super-120b-a12b` (paid, about $0.001 per email)
+4. `nemotron-3-ultra-550b-a55b` (paid, about $0.005 per email)
+5. `gemma-4-31b-it` (free)
+
+The paid models are a safety net. A model that just failed is skipped for 5 minutes, and when the free daily limit is used up the free models are skipped until midnight UTC, so the paid ones take over and the demo keeps working. If all of them fail, the app shows **"OpenRouter API is not working"**.
 
 ## What it does
 
 - **Sorts every email** into one of the six categories.
 - **Reads freight enquiries.** It extracts origin, destination, commodity, gross weight and unit, pieces, dimensions or CBM, Incoterm and cargo-ready date, and decides the mode: **AIR, OCEAN or UNKNOWN**.
 - **Shows what is missing, unclear or conflicting.** It never invents a detail.
-- **Drafts a reply** that asks only for what is missing.
+- **Understands unclear wording.** Ranges ("100-120 kg"), vague dates ("end of the month"), "same terms as last time", "air or sea, whichever is faster", several shipments in one email, and attachments it cannot open. It keeps the customer's own words, shows what is unclear, and asks precise questions. It also notes direct questions from the customer, such as "what are our options?".
+- **Drafts a reply** that asks only for what is missing, and greets the sender by name when the email is signed.
+- **Reads only the newest message** of a reply thread. Forwarded emails are kept, because the request is inside them.
+- **Flags emails that ask for two things**, for example "send the B/L and confirm my payment".
+- **Copies the extraction as JSON**, so the team can use it as structured data.
 
 ## Dashboard
 
@@ -74,7 +86,7 @@ Gold steps use AI, blue steps are plain Python code, and green steps are done by
 | Request for shipping documents | **Documentation**, not freight. Asks which shipment. |
 | Urgent shipment of pharmaceutical samples | Freight · **UNKNOWN**. Asks for mode, weight, pieces, dimensions, ready date, Incoterm, delivery date and temperature needs. |
 
-Load them with the **Test 1–4** buttons in the Send email window. Ten more edge cases are in the "More…" list.
+Load them with the **Test 1–4** buttons in the Send email window. Ten more edge cases are in the "More…" list. The full real output for each test email, with the quotes and the draft reply, is in [docs/TEST_RESULTS.md](docs/TEST_RESULTS.md).
 
 ## Run it on your computer
 
@@ -108,7 +120,8 @@ Set these in `.env`, or as environment variables on the server. The full list is
 | Name | What it does |
 |---|---|
 | `OPENROUTER_API_KEY` | Your OpenRouter key. It stays on the server and is never sent to the browser. |
-| `MODEL_CHAIN` | The models to try, in order, separated by commas. |
+| `MODEL_CHAIN` | The models to try, in order, separated by commas. Models without `:free` are paid. |
+| `MODEL_COOLDOWN_S` | How long a model that just failed is skipped (default 300 seconds). |
 | `ROUTER_MODE` | `two_stage` (default): router agent, then skill agent, 2 AI requests per email. `single`: one request per email. |
 | `MOCK_LLM` | `1` = canned answers, no AI calls. |
 
@@ -134,7 +147,7 @@ git push
 
 GitHub Actions runs the tests, deploys to Render only if they pass, then waits until the new version is live. A red run means the tests failed or the new version did not start. Pull requests only run the tests.
 
-Free Render services sleep after about 15 minutes without visitors and take about a minute to wake up. Open the page a few minutes before a demo.
+Free Render services sleep after about 15 minutes without visitors and take about a minute to wake up. A second workflow, `keepalive.yml`, pings the site every 10 minutes so it stays awake. Delete that file to turn it off.
 
 ## Project layout
 
@@ -144,7 +157,8 @@ skills/       one Markdown file per category (edit these to change behaviour)
 static/       the dashboard (HTML, CSS, JavaScript)
 samples/      sample emails
 tests/        automated tests
-.github/      CI/CD workflow
+docs/         demo guide and real test results
+.github/      CI/CD and keep-alive workflows
 render.yaml   Render service definition
 ```
 
@@ -152,7 +166,7 @@ Skills are read on every request, so changing a file in `skills/` changes the be
 
 ## Good to know
 
-- Free models allow about **50 requests a day** (more after buying $10 of credit) and are sometimes busy or slow. Each email uses 2 requests.
+- Free models allow about **50 requests a day** (1,000 after buying about $10 of credit) and are sometimes busy or slow. Each email uses 2 requests. With some credit on the OpenRouter account, the paid safety-net models take over, so the app keeps working.
 - The app has no connection to tracking, pricing, accounting or document systems. Replies only acknowledge or ask for information. They never quote a price or state a status.
 - Counters and history are saved in your browser, so each person sees their own. Free hosting has no permanent disk.
 - Checking quotes proves a detail is in the email, not that the AI understood it, so a person reviews every draft.

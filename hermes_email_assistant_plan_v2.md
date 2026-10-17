@@ -497,3 +497,40 @@ Cut order if time runs short: quota meter → trace in drawer → "Show all" →
 * **Streaming on Render** works for HTTP responses; the heartbeat prevents idle cut-offs. Falls back to the plain endpoint if streaming fails.
 * **"Send email" wording.** The brief forbids sending real email; the button is kept as you named it, but the modal says it is a simulation.
 * **Tests:** backend stream/stage tests in mock mode (pytest); the UI is checked by hand with a short checklist (all 6 tabs, approve, reject, undo, 24 h counters, dark/light, phone width, failure banner).
+
+---
+
+# 12. The last two hours (plan written 2:35 PM; demo 5:00 PM)
+
+Goal: get the job. The evaluators will (1) run **unseen emails**, (2) ask you to **explain** the design, (3) ask for a **live change**. Everything below serves one of those three, or removes a way the demo could fail.
+
+## 12.1 The biggest risk: the free AI quota
+Your OpenRouter key is on the free tier: **50 requests a day**, and about 33 are used. Each email costs 2–3 requests (the 550B model is usually overloaded and wastes one). That is roughly **6 emails left today** — not enough for testing plus a live demo. If it runs out in front of the evaluator, the app shows "OpenRouter API is not working".
+
+Decision for you: **add $10 of credit** (limit becomes 1,000 requests a day; the free models themselves still cost nothing). If you do not, we test offline and keep the remaining requests for the demo.
+
+## 12.2 Plan (clock times)
+
+| When | Block | What | Why it matters |
+|---|---|---|---|
+| 2:35–3:05 | **A. Do not fail in the demo** | (1) circuit breaker: a model that just failed is skipped for 10 minutes and shown as "cooling down", saving a request on every email; (2) keep-alive: a GitHub Action pings the site every 10 minutes so Render never sleeps; (3) you rotate the API key | Reliability is judged first |
+| 3:05–3:45 | **B. Be right on unseen emails** | Write ~14 realistic hard emails (forwarded threads, two shipments in one email, lbs / cft / tons, reefer and dangerous goods, partial info, conflicting info, only a subject, mixed intent, a non-freight email, a suspicious email). Run them on the live model, fix what fails in the prompts or the Python checks, keep the good ones as samples and as offline tests. Add a Python detector for **mixed intent** (the AI missed it on "BL + payment") | The brief says unseen emails will be tested |
+| 3:45–4:05 | **C. Show the brief clearly** | Review panel in the brief's order: classification → mode → extracted fields → missing / ambiguous / conflicting → draft. "Review draft" becomes the main button after the workflow | "Reviewable output" is a required item |
+| 4:05–4:25 | **D. Win the explanation** | `docs/DEMO_GUIDE.md`: a 5-minute walkthrough, which file does what, 12 likely questions with answers, **five rehearsed live changes** (exact steps and how to check each), what to do if something breaks. Run the 4 tests on the live site and save the real results in `docs/TEST_RESULTS.md` | Understanding and changing your own code is a stated requirement |
+| 4:25–4:30 | **Freeze** | Push, CI/CD deploys, tag `v3.0`, check the live site | |
+| 4:30–5:00 | **You rehearse** | Do the live changes yourself, twice | The demo is 5:00 |
+
+## 12.3 Cut order if time runs short
+C (layout) → mixed-intent detector → keep-alive. **Never cut:** the quota fix, the unseen-email run, the demo guide.
+
+## 12.4 Live-change candidates (rehearsed in D)
+1. Add a new extracted field (for example `special_handling` or `incoterm` rules) — one line in `skills/freight_quotation.md` and one in `app/schemas.py`.
+2. Change the tone or signature of replies — edit one skill file, no restart.
+3. Add a validation rule (for example "reject weights under 1 kg" or a new Incoterm rule) — `app/validators.py` plus one test.
+4. Reorder or swap the AI models — change `MODEL_CHAIN`, no code.
+5. Add a seventh category — one new file in `skills/` and one line in `app/schemas.py`.
+
+## 12.5 What can still go wrong
+- Free models are slow or overloaded at the wrong moment: the chain and the circuit breaker help, they do not remove the risk.
+- Unseen emails can surprise any AI: validation catches invented values, not every misreading — say this honestly in the demo.
+- The free Render plan sleeps when idle: the keep-alive fixes this, but open the site 5 minutes before anyway.

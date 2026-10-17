@@ -7,13 +7,16 @@ from dotenv import load_dotenv
 ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / ".env")
 
-VERSION = "2.2"
+VERSION = "3.1"
 
+# Free models first. The two paid ones (about $0.001 and $0.005 per email) are the safety net:
+# they are only reached when the free models are busy or the free daily limit is used up.
 DEFAULT_CHAIN = (
     "nvidia/nemotron-3-ultra-550b-a55b:free,"
     "nvidia/nemotron-3-super-120b-a12b:free,"
-    "google/gemma-4-31b-it:free,"
-    "nvidia/nemotron-3.5-super-vl:free"
+    "nvidia/nemotron-3-super-120b-a12b,"
+    "nvidia/nemotron-3-ultra-550b-a55b,"
+    "google/gemma-4-31b-it:free"
 )
 
 
@@ -36,7 +39,8 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
 
 MODEL_CHAIN = [m.strip() for m in os.getenv("MODEL_CHAIN", DEFAULT_CHAIN).split(",") if m.strip()]
 
-LLM_TIMEOUT_S = _float("LLM_TIMEOUT_S", 40)  # per model
+MODEL_COOLDOWN_S = _int("MODEL_COOLDOWN_S", 300)  # how long a model that just failed is skipped
+LLM_TIMEOUT_S = _float("LLM_TIMEOUT_S", 30)  # hard limit per model; a slower model is abandoned for the next one
 LLM_DEADLINE_S = _float("LLM_DEADLINE_S", 85)  # whole chain, stays under Render's ~100 s limit
 LLM_MAX_TOKENS = _int("LLM_MAX_TOKENS", 4000)
 

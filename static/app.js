@@ -25,13 +25,17 @@
   const HISTORY_SIZE = 5;
   const LATEST_SIZE = 10;
 
-  const ACTION_LABEL = {
-    DRAFT_ACKNOWLEDGEMENT: 'Draft an acknowledgement',
-    ASK_FOR_INFORMATION: 'Ask for missing information',
-    VERIFY_INTERNALLY: 'Verify internally first',
-    FLAG_FOR_REVIEW: 'Flag for human review',
-    NO_REPLY_NEEDED: 'No reply needed',
-  };
+  // What a person should do next, in plain words.
+  function nextStep(r) {
+    switch (r.recommended_action) {
+      case 'DRAFT_ACKNOWLEDGEMENT': return r.category === 'Freight Quotation Enquiry' ? 'Ready for quotation' : 'Acknowledge the sender';
+      case 'ASK_FOR_INFORMATION': return 'Ask the customer for details';
+      case 'VERIFY_INTERNALLY': return 'Check internally first';
+      case 'FLAG_FOR_REVIEW': return 'Needs human review';
+      case 'NO_REPLY_NEEDED': return 'No reply needed';
+      default: return r.recommended_action;
+    }
+  }
   const FLAG_TEXT = {
     SUSPICIOUS: 'Looks suspicious — needs a human to review it.',
     PROMPT_INJECTION: 'The email tries to give instructions to the AI. They were ignored.',
@@ -39,6 +43,8 @@
     PAST_DATE: 'A date in the email is already in the past.',
     INCOTERM_MODE_MISMATCH: 'The Incoterm does not fit the transport mode.',
     DRAFT_CONTAINS_UNSUPPORTED_CLAIM: 'The AI draft made a claim it cannot support, so a safe template is shown.',
+    MULTIPLE_SHIPMENTS: 'The email describes more than one shipment.',
+    ATTACHMENT_REFERENCED: 'The email refers to an attachment that this tool cannot read.',
   };
   const LLM_CODES = ['LLM_UNAVAILABLE', 'LLM_AUTH', 'LLM_CREDITS'];
   const GROUPS = {
@@ -131,7 +137,12 @@
   const itemsIn = (cat) => state.items.filter((i) => i.result.category === cat).sort((a, b) => b.createdAt - a.createdAt);
   const modeClass = (mode) => (mode === 'AIR' ? 'chip-air' : mode === 'OCEAN' ? 'chip-ocean' : 'chip-unknown');
   const requiredMissing = (r) => r.missing_information.filter((m) => m.reason === 'required').length;
-  const modelLabel = (m) => (!m ? '' : String(m).startsWith('MOCK') ? 'MOCK' : String(m).split('/').pop().replace(':free', ''));
+  const modelLabel = (m) => {
+    if (!m) return '';
+    if (String(m).startsWith('MOCK')) return 'MOCK';
+    const name = String(m).split('/').pop();
+    return name.endsWith(':free') ? name.slice(0, -5) : name + ' · paid';
+  };
   const REASON_TEXT = {
     provider_error: 'overloaded', rate_limited: 'rate-limited', timeout: 'timed out', network_error: 'network error',
     empty_content: 'empty reply', bad_output: 'unusable reply', invalid_response: 'invalid response',
@@ -284,6 +295,14 @@
       case 'model_fail': {
         const st = S(e.stage === 'skill' ? 'agent' : 'router');
         (st.notes = st.notes || []).push(`${modelLabel(e.model)} ${reasonText(e.reason)}`);
+        break;
+      }
+      case 'model_skip': {
+        // a model that failed minutes ago (or the free daily limit) is skipped on purpose
+        const st = S(e.stage === 'skill' ? 'agent' : 'router');
+        const note = e.reason === 'daily_limit' ? 'free models: daily limit used up' : `${modelLabel(e.model)} cooling down`;
+        st.notes = st.notes || [];
+        if (!st.notes.includes(note)) st.notes.push(note);
         break;
       }
       case 'router_done': {
@@ -580,8 +599,8 @@
             h('span', { class: 'chip ' + (r.information_complete ? 'chip-ok' : 'chip-warn'), text: r.information_complete ? 'Info complete' : `${requiredMissing(r)} details missing` }),
             r.draft_reply.source === 'none' ? h('span', { class: 'chip chip-no', text: 'Flagged' }) : null),
           h('div', { class: 'run-actions' },
-            h('button', { class: 'btn btn-primary', type: 'button', onclick: goDashboard }, 'Go to dashboard'),
-            h('button', { class: 'btn btn-ghost', type: 'button', onclick: () => reviewNow(item.id) }, 'Review draft'),
+            h('button', { class: 'btn btn-primary', type: 'button', onclick: () => reviewNow(item.id) }, 'Review draft'),
+            h('button', { class: 'btn btn-ghost', type: 'button', onclick: goDashboard }, 'Go to dashboard'),
             h('button', { class: 'btn btn-ghost', type: 'button', onclick: analyseAnother }, 'Analyse another'))));
       }
     } else if (run.status === 'error') {
@@ -627,20 +646,23 @@
     const d = r.draft_reply;
     const sections = [];
 
-    // chips
-    const chips = [];
+    // 1. classification and mode (the brief's order: classification -> mode -> fields -> missing -> reply)
+    const chips = [
+      h('span', { class: 'chip chip-cat', text: r.category }),
+      h('span', { class: 'chip chip-soft', text: `${r.category_confidence} confidence` }),
+    ];
     if (r.mode) {
       chips.push(h('span', { class: 'chip ' + modeClass(r.mode), text: 'Mode: ' + r.mode + (r.submode ? ' · ' + r.submode : '') }));
       chips.push(h('span', { class: 'mode-note', text: r.mode_evidence ? `from “${r.mode_evidence}”` : 'no explicit air/ocean wording' }));
     }
-    chips.push(h('span', { class: 'chip chip-soft', text: ACTION_LABEL[r.recommended_action] || r.recommended_action }));
     if (r.meta && r.meta.mock) chips.push(h('span', { class: 'chip chip-warn', text: 'MOCK' }));
     sections.push(h('div', { class: 'sec' },
+      h('h3', { text: 'Classification' }),
       h('div', { class: 'chip-row' }, chips),
+      r.category_reason ? h('p', { class: 'muted small', style: 'margin-top:8px', text: r.category_reason }) : null,
       h('div', { class: 'status-chips' },
         checkChip(r.information_complete, 'Information complete', `Incomplete (${requiredMissing(r)} required missing)`),
-        checkChip(r.information_verified, 'Verified', 'Not verified'),
-        checkChip(r.action_available, 'Action available', 'No action available'))));
+        h('span', { class: 'chip chip-soft', text: 'Next: ' + nextStep(r) }))));
 
     // draft
     const srcChip = h('span', {
@@ -661,14 +683,18 @@
       bodyTa.addEventListener('input', onEdit);
       draftBox = h('div', { style: 'display:grid;gap:8px' }, subj, bodyTa);
     }
-    sections.push(h('div', { class: 'sec' },
-      h('div', { class: 'sec-head' }, h('h3', { text: 'Reply' }), srcChip),
+    const replySection = h('div', { class: 'sec' },
+      h('div', { class: 'sec-head' }, h('h3', { text: 'Suggested reply' }), srcChip),
       h('div', { class: 'draft-notes', text: (d.notes || []).join(' ') }),
-      draftBox));
+      draftBox);
 
-    sections.push(h('div', { class: 'panel' }, h('h3', { text: 'Needs attention' }), renderAttention(r)));
-    sections.push(h('div', { class: 'panel' }, h('h3', { text: 'Extracted fields' }),
+    // 2. extracted fields, 3. missing / unclear / conflicting, 4. the reply
+    sections.push(h('div', { class: 'panel' },
+      h('div', { class: 'sec-head' }, h('h3', { text: 'Extracted fields' }),
+        h('button', { class: 'btn btn-ghost btn-sm', type: 'button', onclick: () => copyJson(item.id) }, 'Copy JSON')),
       h('table', { class: 'fields-table' }, h('tbody', {}, fieldRows(r)))));
+    sections.push(h('div', { class: 'panel' }, h('h3', { text: 'Missing, unclear or conflicting' }), renderAttention(r)));
+    sections.push(replySection);
 
     const steps = traceFor(item);
     const validate = step(steps, 'validate');
@@ -759,10 +785,14 @@
         h('li', {}, m.label, m.reason === 'recommended' ? h('span', { class: 'tag', text: 'recommended' }) : null)));
     }
     if (r.conflicts.length) blocks.push(attentionBlock('Conflicts', r.conflicts, (t) => h('li', { text: t })));
-    if (r.ambiguities.length) blocks.push(attentionBlock('Ambiguous', r.ambiguities, (t) => h('li', { text: t })));
+    if (r.ambiguities.length) blocks.push(attentionBlock('Unclear', r.ambiguities, (t) => h('li', { text: t })));
+    if (r.customer_questions && r.customer_questions.length) {
+      blocks.push(attentionBlock('Customer asks', r.customer_questions, (t) => h('li', { text: t })));
+    }
     if (r.removed_unsupported.length) blocks.push(attentionBlock('Removed by validation', r.removed_unsupported, (t) => h('li', { text: t })));
     if (r.flags.length) blocks.push(attentionBlock('Flags', r.flags, (f) => h('li', { text: FLAG_TEXT[f] || f })));
     if (r.mode_note) blocks.push(attentionBlock('Mode', [r.mode_note], (t) => h('li', { text: t })));
+    if (r.notes && r.notes.length) blocks.push(attentionBlock('Note', r.notes, (t) => h('li', { text: t })));
     return h('div', {}, blocks.length ? blocks : h('p', { class: 'att-clear', text: '✓ Nothing to flag' }));
   }
 
@@ -791,10 +821,7 @@
     if (state.drawerId === id) renderDrawer();
     toast('Moved back to pending.');
   }
-  async function copyDraft(id) {
-    const item = byId(id);
-    if (!item) return;
-    const text = `Subject: ${item.draftSubject}\n\n${item.draftBody}`;
+  async function copyText(text, message) {
     try {
       await navigator.clipboard.writeText(text);
     } catch (e) {
@@ -805,7 +832,36 @@
       try { document.execCommand('copy'); } catch (err) { /* ignore */ }
       ta.remove();
     }
-    toast('Copied.');
+    toast(message);
+  }
+  function copyDraft(id) {
+    const item = byId(id);
+    if (item) copyText(`Subject: ${item.draftSubject}\n\n${item.draftBody}`, 'Reply copied.');
+  }
+  /** The extraction as structured data a team (or another system) can use. */
+  function structuredJson(item) {
+    const r = item.result;
+    const fields = {};
+    for (const [key, f] of Object.entries(r.fields)) fields[key] = f.found ? { value: f.value, unit: f.unit, evidence: f.evidence } : null;
+    return {
+      subject: item.subject,
+      category: r.category,
+      confidence: r.category_confidence,
+      mode: r.mode,
+      submode: r.submode,
+      fields,
+      missing_information: r.missing_information.map((m) => ({ field: m.field, ask: m.label, reason: m.reason })),
+      ambiguities: r.ambiguities,
+      conflicts: r.conflicts,
+      flags: r.flags,
+      recommended_action: r.recommended_action,
+      information_complete: r.information_complete,
+      draft_reply: { subject: item.draftSubject, body: item.draftBody },
+    };
+  }
+  function copyJson(id) {
+    const item = byId(id);
+    if (item) copyText(JSON.stringify(structuredJson(item), null, 2), 'JSON copied.');
   }
   function resetAll() {
     if (!state.items.length) return;

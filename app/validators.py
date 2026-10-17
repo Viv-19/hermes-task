@@ -34,6 +34,8 @@ _INCOTERM_TOKEN = re.compile(r"\b(EXW|FCA|CPT|CIP|DAP|DPU|DDP|FAS|FOB|CFR|CIF|DA
 _AIR_PATTERNS = [
     r"\bair\s*-?\s*(?:fr(?:ei|ie)ght|cargo|shipment|shipping|rate|quote|quotation|consignment)s?\b",
     r"\bairfr(?:ei|ie)ght\b",
+    r"\b(?:or|either|versus|vs\.?)\s+air\b",  # "container or air"
+    r"\bair\s+(?:or|versus|vs\.?)\b",         # "air or sea"
     r"\bby\s+air\b",
     r"\bvia\s+air\b",
     r"\bawb\b",
@@ -51,6 +53,8 @@ _OCEAN_PATTERNS = [
     r"\bocean\b",
     r"\bby\s+sea\b",
     r"\bvia\s+sea\b",
+    r"\b(?:or|either|versus|vs\.?)\s+(?:sea|ocean)\b",  # "air or sea"
+    r"\b(?:sea|ocean)\s+(?:or|versus|vs\.?)\b",         # "sea or air"
     r"\bvessel\b",
     r"\bbill\s+of\s+lading\b",
     r"\bb/l\b",
@@ -63,7 +67,8 @@ LCL_RE = re.compile(r"\blcl\b|\bless\s+than\s+(?:a\s+)?container\b|\bconsolidat"
 
 # --------------------------------------------------------------------------- misc patterns
 URGENCY_RE = re.compile(
-    r"\burgent(?:ly)?\b|\basap\b|\bas soon as possible\b|\bdeadline\b|\bexpedite\b|\brush\b"
+    r"\burgent(?:ly)?\b|\basap\b|\bas soon as (?:reasonably |humanly )?possible\b|\bat the earliest\b"
+    r"|\bearliest (?:possible|available)\b|\bsoonest\b|\bimmediate(?:ly)?\b|\bdeadline\b|\bexpedite\b|\brush\b"
     r"|\btime[- ]sensitive\b|\bcritical\b|\bpriority\b",
     re.I,
 )
@@ -71,6 +76,11 @@ SPECIAL_CARGO_RE = re.compile(
     r"pharma|medicin|medical|drug|vaccine|chemical|batter|lithium|perishable|frozen|fragile|"
     r"hazard|dangerous|flammable|explosive|radioactive|aerosol|perfume|temperature|cold chain|"
     r"biological|specimen|live animal",
+    re.I,
+)
+ATTACHMENT_REF_RE = re.compile(
+    r"\b(?:see|find|refer to|as per|per|check|in the)\s+(?:the\s+)?attach(?:ed|ment|ments)\b"
+    r"|\battached\s+(?:file|document|sheet|list|copy|pdf|excel|photo|image)s?\b",
     re.I,
 )
 INJECTION_RE = re.compile(
@@ -93,8 +103,14 @@ TRANSIT_RE = re.compile(
     r"\b(?:transit(?:\s+time)?|deliver\w*|arriv\w*)\b[^.\n]{0,40}\b\d+\s*(?:-\s*\d+\s*)?(?:hours?|days?|weeks?)\b",
     re.I,
 )
+# Only OUR claims count ("we have attached", "please find attached"); "the attached packing list" is the
+# customer's own attachment being mentioned.
 ATTACH_RE = re.compile(
-    r"\b(?:attached|enclosed|find\s+attached|we\s+have\s+sent|has\s+been\s+sent|have\s+been\s+sent)\b", re.I
+    r"\b(?:we|i)(?:\s+have|'ve)?\s+(?:attached|enclosed|sent)\b"
+    r"|\bplease\s+find\s+(?:the\s+)?(?:attached|enclosed)\b"
+    r"|\b(?:is|are)\s+(?:attached|enclosed)\b"
+    r"|\b(?:has|have)\s+been\s+(?:sent|attached)\b",
+    re.I,
 )
 STATUS_CLAIM_RE = re.compile(
     r"\b(?:is|are|was|has|have)\s+(?:currently\s+|now\s+)?(?:in\s+transit|delivered|delayed|cleared|on\s+its\s+way|"
@@ -104,6 +120,8 @@ STATUS_CLAIM_RE = re.compile(
     re.I,
 )
 GUARANTEE_RE = re.compile(r"\bguarantee[ds]?\b", re.I)
+# This tool reads only the text of an email, so a reply must never promise to look at an attachment.
+ATTACH_READ_RE = re.compile(r"\b(?:review|check|open|read|look at|examine|go through)\b[^.\n]{0,40}\battach", re.I)
 
 # Words a draft must contain to count as "asking for" a missing item.
 COVERAGE = {
@@ -128,9 +146,44 @@ COVERAGE = {
     "invoice_or_transaction": r"\b(invoice|transaction|reference)\b",
     "correction_details": r"\b(correct\w*|amend\w*|detail\w*)\b",
     "cargo_ready_date_exact": r"\b(exact|specific|precise)\b",
+    "which_shipment": r"\b(which shipment|more than one|first shipment|each shipment|both shipments)\b",
+    "attachment_details": r"\b(?:cannot|can't|unable to|only)\b[^.\n]{0,60}\battach|\bin the (?:body|text)\b|\bwritten in\b",
 }
 
 NUMERIC_FIELDS = {"gross_weight", "pieces", "cbm"}
+RANGE_RE = re.compile(r"\d\s*(?:-|–|—|to|or)\s*\d", re.I)  # "100-120", "4 or 5"
+
+# Clear wording that shows a request of each kind. Used to catch emails that ask for two things.
+_INTENT_SIGNALS = {
+    S.FREIGHT: re.compile(r"\b(?:quote|quotation|quoting|rate request|rates? for|best rate|price for|pricing for)\b", re.I),
+    S.STATUS: re.compile(
+        r"\b(?:status of|tracking|track (?:my|the|this)|where is|eta|etd|delayed"
+        r"|update on (?:my|the|this) (?:shipment|cargo|container))\b",
+        re.I,
+    ),
+    # a document counts as REQUESTED only when a request word comes before it ("please send the B/L"),
+    # not when it is merely mentioned ("the packing list is attached")
+    S.DOCS: re.compile(
+        r"\b(?:send|share|provide|resend|need|require|issue|correct|copy of|request(?:ing)?|get|forward)\b[^.\n]{0,40}"
+        r"\b(?:bill of lading|b/l|packing list|commercial invoice|shipping documents?|awb copy|certificate of origin)\b",
+        re.I,
+    ),
+    S.PAYMENT: re.compile(r"\bpayment(?!\s+terms?)\b|\b(?:remittance|refund|outstanding|overdue|utr|paid)\b", re.I),
+}
+_INTENT_WORD = {
+    S.FREIGHT: "a freight quotation",
+    S.STATUS: "shipment status",
+    S.DOCS: "shipping documents",
+    S.PAYMENT: "payment",
+}
+
+
+def detect_mixed_intent(text: str, category: str) -> list[str]:
+    """Other kinds of request found in the email besides the main category (deterministic, no AI)."""
+    strong = [c for c, rx in _INTENT_SIGNALS.items() if rx.search(text)]
+    if category in strong:
+        return [c for c in strong if c != category]
+    return strong if len(strong) >= 2 else []
 
 # Greeting by name: "Thanks,\nRohit" -> "Dear Rohit,"
 _CLOSING_RE = re.compile(
@@ -144,8 +197,6 @@ _NOT_A_NAME = re.compile(
     re.I,
 )
 
-# Words a draft may use to ask for the exact date of a relative cargo-ready date ("end of this month")
-COVERAGE_EXACT_DATE = r"\b(exact|specific|precise)\b"
 
 # --------------------------------------------------------------------------- small helpers
 
@@ -186,6 +237,71 @@ def _clean_list(value, limit: int = 8) -> list[str]:
     return out[:limit]
 
 
+def _read_ambiguities(value, ntext: str, removed: list[str], fields: dict | None = None) -> tuple[list[str], list[dict]]:
+    """Ambiguities arrive as plain strings or as {field, quote, issue, question}.
+
+    A quote must really appear in the email; otherwise the whole point is dropped (it may be invented).
+    Returns (lines to show, questions to ask the customer — at most 3).
+    """
+    if isinstance(value, (str, dict)):
+        value = [value]
+    if not isinstance(value, list):
+        return [], []
+    lines: list[str] = []
+    questions: list[dict] = []
+    for item in value:
+        if isinstance(item, dict):
+            quote = clean_str(item.get("quote"), 160)
+            issue = clean_str(item.get("issue"), 200)
+            question = clean_str(item.get("question"), 220)
+            field = clean_str(item.get("field"), 40)
+            if not (issue or question):
+                continue
+            if quote and not contains(ntext, norm(quote)):
+                removed.append(f"An unclear point was dropped because the quote “{quote}” is not in the email.")
+                continue
+            # A whole sentence quoted for a detail that is simply missing is a missing detail (asked about
+            # separately), not an unclear one. "general" points (such as a second shipment) are kept.
+            if quote and len(quote.split()) > 10 and field != "general" and fields and field in fields and not fields[field]["found"]:
+                continue
+            # "dimensions not provided" for a detail that is simply missing is not an unclear point either
+            if fields and field in fields and not fields[field]["found"] and re.search(
+                r"\b(?:not|no|missing|unknown|unspecified)\b", issue or "", re.I
+            ):
+                continue
+            line = (f"“{quote}” — " if quote else "") + (issue or question)
+            if line not in lines:
+                lines.append(line)
+            if question and len(questions) < 3:
+                questions.append({"field": field, "quote": quote, "issue": issue, "question": question})
+        else:
+            text = clean_str(item, 220)
+            # a short phrase copied verbatim from the email ("price quation", "urgent") explains nothing
+            if text and not (len(text.split()) <= 6 and contains(ntext, norm(text))) and text not in lines:
+                lines.append(text)
+    return lines[:8], questions
+
+
+def _read_signals(value) -> dict:
+    """What the AI noticed in the wording. These are combined with the word lists, never trusted alone."""
+    value = value if isinstance(value, dict) else {}
+    keys = ("urgent", "vague_dates", "special_handling", "multiple_shipments", "references_attachment")
+    return {k: value.get(k) is True or str(value.get(k)).strip().lower() == "true" for k in keys}
+
+
+def _unanswered_questions(questions: list[str], draft_body: str) -> list[str]:
+    """Customer questions the draft does not touch (transit time has its own rule)."""
+    ndraft = norm(draft_body)
+    out = []
+    for q in questions:
+        if re.search(r"\btransit\b", q, re.I):
+            continue
+        words = [w for w in norm(q).split() if len(w) >= 5]
+        if words and not any(w in ndraft for w in words):
+            out.append(q)
+    return out
+
+
 def _numbers(text: str) -> set[str]:
     out = set()
     for match in re.findall(r"\d[\d,]*(?:\.\d+)?", text):
@@ -204,6 +320,8 @@ def sender_name(body: str) -> str | None:
         if not match:
             continue
         candidate = (match.group(1) or "").strip() or next((nxt for nxt in lines[i + 1 : i + 3] if nxt), "")
+        # "Rohit Mehra, Supply Chain Manager" / "Priya | Sales" -> keep only the name part
+        candidate = re.split(r"\s*[,|]\s*|\s+[–—-]\s+", candidate)[0].strip()
         if candidate and _NAME_RE.match(candidate) and not _NOT_A_NAME.search(candidate):
             return candidate.split()[0]
     return None
@@ -349,7 +467,7 @@ def _parse_date(text: str) -> tuple[int, int, int | None] | None:
     return int(day), _MONTHS[month.lower()[:3]], int(year) if year else None
 
 
-def _freight_checks(fields, text, mode, ambiguities, conflicts, flags, today: date) -> None:
+def _freight_checks(fields, text, mode, ambiguities, conflicts, flags, today: date, urgent: bool = False) -> None:
     # --- weights: unit present? several different weights in the email?
     weight = fields["gross_weight"]
     if weight["found"]:
@@ -416,7 +534,7 @@ def _freight_checks(fields, text, mode, ambiguities, conflicts, flags, today: da
 
     # --- urgency without a real deadline
     if (
-        URGENCY_RE.search(text)
+        (URGENCY_RE.search(text) or urgent)
         and not fields["delivery_deadline"]["found"]
         and not any(len(a) > 25 and re.search(r"urgent|deadline|delivery", a, re.I) for a in ambiguities)
     ):
@@ -433,7 +551,11 @@ def _container_has_size(fields: dict) -> bool:
     return bool(CONTAINER_SIZE_RE.search(f"{container['value']} {container['evidence'] or ''}"))
 
 
-def compute_missing(category: str, fields: dict, mode: str | None, submode: str | None, text: str) -> list[dict]:
+def compute_missing(
+    category: str, fields: dict, mode: str | None, submode: str | None, text: str, signals: dict | None = None
+) -> list[dict]:
+    """What to ask the customer. Word lists AND the AI's signals can both trigger the optional questions."""
+    signals = signals or {}
     found = lambda key: bool(fields.get(key, {}).get("found"))  # noqa: E731
     missing: list[dict] = []
 
@@ -477,13 +599,15 @@ def compute_missing(category: str, fields: dict, mode: str | None, submode: str 
         if not _container_has_size(fields):
             add("container_type", S.EXTRA_ASK["container_type"])
         # Conditional asks — recommended, not blocking
-        if URGENCY_RE.search(text) and not found("delivery_deadline"):
+        if (URGENCY_RE.search(text) or signals.get("urgent")) and not found("delivery_deadline"):
             add("delivery_deadline", S.field_ask(category, "delivery_deadline"), "recommended")
         ready = fields["cargo_ready_date"]
-        if ready["found"] and ready["note"] == "not an exact date":
+        if ready["found"] and (
+            ready["note"] == "not an exact date" or (signals.get("vague_dates") and not _parse_date(ready["value"]))
+        ):
             add("cargo_ready_date_exact", f"the exact cargo-ready date (you wrote “{ready['value']}”)", "recommended")
         commodity = fields["commodity"]["value"] or ""
-        if SPECIAL_CARGO_RE.search(f"{commodity} {text}") and not found("special_handling"):
+        if (SPECIAL_CARGO_RE.search(f"{commodity} {text}") or signals.get("special_handling")) and not found("special_handling"):
             add("special_handling", S.field_ask(category, "special_handling"), "recommended")
     if category == S.DOCS and re.search(
         r"correct|amend|revis|change", fields["requested_action"]["value"] or "", re.I
@@ -496,9 +620,25 @@ def compute_missing(category: str, fields: dict, mode: str | None, submode: str 
 # --------------------------------------------------------------------------- 5. draft guard
 
 
-def _asks_for(body: str, key: str) -> bool:
+def _asks_for(body: str, key: str, item: dict | None = None) -> bool:
+    """Does the draft already ask for this? Questions from the AI count as asked when they quote the customer."""
+    if key.startswith("clarify_"):
+        # asked if the draft repeats most of the customer's words (the AI often paraphrases a little)
+        quote = norm((item or {}).get("quote") or "")
+        words = [w for w in quote.split() if len(w) >= 4]
+        if not words:  # a short quote such as "100-120 kg": it must appear as written
+            return contains(norm(body), quote) if quote else True
+        in_draft = set(norm(body).split())
+        return sum(w in in_draft for w in words) / len(words) >= 0.6
     pattern = COVERAGE.get(key)
     return True if pattern is None else bool(re.search(pattern, body, re.I))
+
+
+def _ask_name(category: str, item: dict) -> str:
+    """A short human name for a missing item, used in notes."""
+    if item["field"].startswith("clarify_") and item.get("quote"):
+        return f"“{item['quote']}”"
+    return S.field_label(category, item["field"])
 
 
 def _draft_problems(body: str, missing: list[dict], category: str) -> list[str]:
@@ -513,6 +653,8 @@ def _draft_problems(body: str, missing: list[dict], category: str) -> list[str]:
         problems.append("it claimed a shipment or payment status")
     if GUARANTEE_RE.search(body):
         problems.append("it made a guarantee")
+    if ATTACH_READ_RE.search(body):
+        problems.append("it promised to read an attachment, which this tool cannot open")
     # Only *required* gaps force a template; "recommended" asks are a bonus, not a failure.
     unasked = [m for m in missing if m["reason"] == "required" and not _asks_for(body, m["field"])]
     if unasked:
@@ -529,6 +671,16 @@ def _append_asks(body: str, items: list[dict]) -> str | None:
     new = [f"- {m['label'][:1].upper()}{m['label'][1:]}" for m in items]
     lines[bullets[-1] + 1 : bullets[-1] + 1] = new
     return "\n".join(lines)
+
+
+def _insert_before_signoff(body: str, line: str) -> str:
+    """Put one extra sentence just above 'Best regards' (or at the end if there is no sign-off)."""
+    match = None
+    for match in re.finditer(r"\n\s*(?:best regards|kind regards|regards|sincerely)\s*,", body, re.I):
+        pass
+    if match:
+        return body[: match.start()].rstrip() + "\n\n" + line + "\n\n" + body[match.start() :].lstrip("\n")
+    return body.rstrip() + "\n\n" + line
 
 
 def _template_body(category: str, fields: dict, missing: list[dict], text: str, flags: set[str]) -> str:
@@ -711,12 +863,25 @@ def build_result(subject: str, body: str, raw: dict, today: date | None = None) 
     removed: list[str] = []
 
     fields = _clean_fields(category, raw.get("fields"), text, removed)
-    # A short phrase copied verbatim from the email ("price quation", "urgent") explains nothing — drop it.
     ntext = norm(text)
-    ambiguities = [
-        a for a in _clean_list(raw.get("ambiguities"))
-        if not (len(a.split()) <= 6 and contains(ntext, norm(a)))
-    ]
+    ambiguities, clarifications = _read_ambiguities(raw.get("ambiguities"), ntext, removed, fields)
+    # A range or an "either/or" number is not one figure — caught by rule even if the AI did not say so.
+    for name in NUMERIC_FIELDS:
+        item = fields.get(name)
+        if not item or not item["found"] or not RANGE_RE.search(item["value"]):
+            continue
+        if any(c["field"] == name for c in clarifications) or len(clarifications) >= 3:
+            continue
+        shown = f"{item['value']} {item['unit'] or ''}".strip()
+        quote = shown if contains(ntext, norm(shown)) else (item["evidence"] or item["value"])
+        ambiguities.append(f"“{quote}” — a range, not one figure")
+        clarifications.append({
+            "field": name, "quote": quote, "issue": "a range, not one figure",
+            "question": f"the confirmed {item['label'].lower()} (you wrote “{quote}”)",
+        })
+    signals = _read_signals(raw.get("signals"))
+    customer_questions = _clean_list(raw.get("customer_questions"))[:3]
+    notes_out: list[str] = []
     conflicts = _clean_list(raw.get("conflicts"))
     flags = {str(f).strip().upper() for f in _clean_list(raw.get("flags"))} & S.LLM_FLAGS
     if INJECTION_RE.search(text):
@@ -733,9 +898,51 @@ def build_result(subject: str, body: str, raw: dict, today: date | None = None) 
                 if mode == "UNKNOWN"
                 else f"The AI suggested {hint}; the wording in the email says {mode}, which takes priority."
             )
-        _freight_checks(fields, text, mode, ambiguities, conflicts, flags, today)
+        _freight_checks(fields, text, mode, ambiguities, conflicts, flags, today, urgent=signals["urgent"])
 
-    missing = compute_missing(category, fields, mode, submode, text)
+    others = detect_mixed_intent(text, category)
+    if not others:
+        flags.discard("MIXED_INTENT")  # the AI over-flags; a second request counts only when the wording shows it
+    if others:
+        flags.add("MIXED_INTENT")
+        ambiguities.append(
+            "The email also asks about " + " and ".join(_INTENT_WORD[c] for c in others)
+            + " — the main request is handled first."
+        )
+
+    # Things the AI noticed in the wording (several shipments, attachments we cannot open)
+    extra_asks: list[dict] = []
+    if category == S.FREIGHT and signals["multiple_shipments"]:
+        flags.add("MULTIPLE_SHIPMENTS")
+        ambiguities.append("The email seems to describe more than one shipment.")
+        if not any("shipment" in (c["question"] or "").lower() for c in clarifications):  # the AI may have asked already
+            extra_asks.append({
+                "field": "which_shipment", "reason": "recommended",
+                "label": "which shipment you would like us to quote first (the email describes more than one)",
+            })
+    if signals["references_attachment"] or ATTACHMENT_REF_RE.search(text):
+        flags.add("ATTACHMENT_REFERENCED")
+        notes_out.append("The email refers to an attachment. This tool reads only the text, so details inside it are not included.")
+        extra_asks.append({
+            "field": "attachment_details", "reason": "recommended",
+            "label": "the key details from the attachment, written in the body of your email (we can only read the text)",
+        })
+
+    missing = compute_missing(category, fields, mode, submode, text, signals)
+    covered = {m["field"] for m in missing}
+    # The AI's questions about unclear points: only for details that WERE given (unanswered fields are already asked)
+    for index, clar in enumerate(clarifications):
+        target = clar["field"]
+        if target in fields and not fields[target]["found"]:
+            continue
+        if target in covered or (target == "cargo_ready_date" and "cargo_ready_date_exact" in covered):
+            continue
+        missing.append({
+            "field": f"clarify_{target or 'general'}_{index}", "label": clar["question"],
+            "reason": "recommended", "quote": clar["quote"],
+        })
+    missing += [m for m in extra_asks if m["field"] not in covered]
+
     action = _decide_action(category, missing, flags, raw.get("recommended_action"))
     name = sender_name(body)
 
@@ -760,15 +967,31 @@ def build_result(subject: str, body: str, raw: dict, today: date | None = None) 
             source = "template"
         else:
             source = "ai"
-            extra = [m for m in missing if m["reason"] == "recommended" and not _asks_for(draft_body, m["field"])]
+            extra = [m for m in missing if m["reason"] == "recommended" and not _asks_for(draft_body, m["field"], m)]
             appended = _append_asks(draft_body, extra) if extra else None
             if appended:
                 draft_body = appended
                 notes.append(
                     "Validation added these recommended questions to the AI draft: "
-                    + ", ".join(S.field_label(category, m["field"]) for m in extra)
+                    + ", ".join(_ask_name(category, m) for m in extra)
                     + "."
                 )
+            # The customer asked about transit time: the reply must not ignore it (and must not state one).
+            if category == S.FREIGHT and re.search(r"\btransit\b", text, re.I) and not re.search(r"\btransit\b", draft_body, re.I):
+                draft_body = _insert_before_signoff(
+                    draft_body,
+                    "We have noted your request for the estimated transit time and will address it together with the quotation.",
+                )
+                notes.append("Added a line about the transit time the customer asked for.")
+        # Direct questions from the customer must not be ignored (and are never answered with facts we lack)
+        unanswered = _unanswered_questions(customer_questions, draft_body)
+        if unanswered:
+            draft_body = _insert_before_signoff(
+                draft_body,
+                "We have also noted your question" + ("s" if len(unanswered) > 1 else "") + ": "
+                + "; ".join(f"“{q}”" for q in unanswered) + ".",
+            )
+            notes.append("Added a line acknowledging the customer's own questions.")
         draft = {
             "subject": draft_subject or (f"Re: {subject}" if subject else "Re: your email"),
             "body": _personalize(draft_body, name),
@@ -788,6 +1011,10 @@ def build_result(subject: str, body: str, raw: dict, today: date | None = None) 
         "fields": fields,
         "missing_information": missing,
         "ambiguities": ambiguities[:8],
+        "clarifications": clarifications,
+        "customer_questions": customer_questions,
+        "signals": signals,
+        "notes": notes_out,
         "conflicts": conflicts[:8],
         "removed_unsupported": removed,
         "information_complete": not any(m["reason"] == "required" for m in missing),

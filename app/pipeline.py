@@ -11,7 +11,7 @@ import json
 import re
 import time
 
-from . import config, llm, mock, skills, validators
+from . import config, llm, mock, preprocess, skills, validators
 from . import schemas as S
 
 _CACHE: dict[str, tuple[float, list[dict], dict]] = {}
@@ -152,6 +152,9 @@ async def analyze_events(subject: str, body: str, fresh: bool = False):
         yield ev("done", result=result, cached=True)
         return
 
+    # Only the newest message is analysed: quoted reply history is cut off (forwards are kept).
+    body, quoted_removed = preprocess.strip_quoted(body)
+
     mode = "mock" if config.MOCK_LLM else ("single" if config.ROUTER_MODE == "single" else "two_stage")
     attempt_log: list[dict] = []
     stage_info: dict = {}
@@ -288,6 +291,8 @@ async def analyze_events(subject: str, body: str, fresh: bool = False):
     raw["category_reason"] = route["reason"]
     raw["flags"] = list(raw.get("flags") or []) + route["flags"]
     result = validators.build_result(subject, body, raw)
+    if quoted_removed:
+        result["notes"].append(f"Earlier messages in the thread ({quoted_removed} lines) were ignored.")
     checks = validators.summarize_checks(result)
     result["checks"] = checks
     issues = sum(1 for c in checks if c["status"] in ("warn", "fail"))

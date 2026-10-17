@@ -91,6 +91,41 @@
     "body": "give me price qatation for sending textile from mumbai port to new york"
   },
   {
+    "id": "a1",
+    "group": "edge",
+    "label": "Unclear: ranges, vague dates, terms",
+    "subject": "Tiles from Morbi – need options",
+    "body": "Hello, we need to ship roughly 2-3 tonnes of ceramic tiles, probably 4 or 5 pallets plus a few loose cartons, from Morbi to Jebel Ali. Cargo should be ready around mid-November, can't say exactly. Terms as agreed earlier. Either container or air, depends on cost - what are our options?\n\nRegards,\nSanjay Patel, Procurement"
+  },
+  {
+    "id": "a2",
+    "group": "edge",
+    "label": "Two shipments + attachment",
+    "subject": "Two quotes please",
+    "body": "Please quote 150 kg of leather samples from Kanpur to Milan by air. In addition we have a 40HC of finished shoes from Chennai to Hamburg in December. The packing list is attached, please check the attached sheet.\n\nThanks,\nNeha"
+  },
+  {
+    "id": "a3",
+    "group": "edge",
+    "label": "Payment: partial, unconfirmed",
+    "subject": "Payment for the Antwerp job",
+    "body": "Hello, we transferred some money for the Mumbai-Antwerp job last week but our bank has not confirmed everything yet. Can you check if it reached you and tell us what is still due?\n\nThanks,\nImran"
+  },
+  {
+    "id": "a4",
+    "group": "edge",
+    "label": "Status: vague references",
+    "subject": "Late shipments?",
+    "body": "Hi team, my two consignments are late I think. One is AWB 098-7654321, the other left Chennai on a vessel last month. When will they arrive? Is customs a problem?\n\nVikram"
+  },
+  {
+    "id": "a5",
+    "group": "edge",
+    "label": "Documents: which version?",
+    "subject": "BL and packing list",
+    "body": "Please resend the BL, the earlier one had a mistake. Also need the packing list for the Rotterdam shipment, urgently.\n\nPooja"
+  },
+  {
     "id": "e9",
     "group": "edge",
     "label": "General business email",

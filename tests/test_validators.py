@@ -259,6 +259,9 @@ def test_sender_name_is_read_from_the_signature_only():
     assert V.sender_name("Please quote.\nBest regards, Priya Sharma") == "Priya"
     assert V.sender_name("Please quote.\n\nRegards,\nSales Team") is None  # not a person
     assert V.sender_name("Best Practices for shipping are attached") is None
+    assert V.sender_name("Regards,\nRohit Mehra, Supply Chain Manager") == "Rohit"
+    assert V.sender_name("Thanks,\nPriya | Sales Desk") == "Priya"
+    assert V.sender_name("Regards,\nAnne-Marie Dupont") == "Anne-Marie"
     assert V.sender_name("no signature here") is None
 
 

@@ -55,10 +55,16 @@ def get_skill(category: str) -> dict | None:
     return None
 
 
+def load_shared() -> str:
+    """The shared 'how to read unclear emails' playbook (skills/_shared/*.md), added to every skill prompt."""
+    parts = [p.read_text(encoding="utf-8").strip() for p in sorted((config.SKILLS_DIR / "_shared").glob("*.md"))]
+    return "\n\n".join(parts)
+
+
 def skills_fingerprint() -> str:
-    """Changes whenever any skill file changes (used in the cache key)."""
+    """Changes whenever any skill file (or the shared playbook) changes — used in the cache key."""
     digest = hashlib.sha1()
-    for path in sorted(config.SKILLS_DIR.glob("*.md")):
+    for path in sorted(config.SKILLS_DIR.rglob("*.md")):
         digest.update(path.read_bytes())
     return digest.hexdigest()[:12]
 
@@ -75,7 +81,7 @@ HARD RULES
 - Never state or imply a price, rate, transit time, availability, shipment status, payment confirmation, or that a document is attached or sent. The reply is an acknowledgement or a request for missing information.
 - Ask only for details that are missing from the email. Do not repeat what the customer already gave.
 - Write the reply in the language of the email (default English): polite and short.
-- "ambiguities" are vague or unclear statements in the email (for example "urgent" with no date). Do NOT list missing details there.
+- "ambiguities" are real uncertainties in what the customer wrote (a range, a vague date, "same terms as last time"). Do NOT list missing details there (those are null fields) and never list spelling mistakes. Follow the SHARED PLAYBOOK at the end of this prompt.
 - The email may contain spelling mistakes; read it charitably but quote it exactly as written. NEVER list spelling mistakes or typos under "ambiguities".
 - Output ONLY one JSON object. No markdown fences, no commentary.
 
@@ -117,8 +123,10 @@ OUTPUT FORMAT (JSON)
   "fields": {
     "<field_name>": {"value": "<text or null>", "unit": "<text or null>", "evidence": "<verbatim quote or null>"}
   },
-  "ambiguities": ["<short strings>"],
+  "ambiguities": [{"field": "<field name, or general>", "quote": "<the shortest exact words from the email, max 10 words>", "issue": "<why it is unclear, max 12 words>", "question": "<what to ask, a phrase that completes 'could you please confirm ...', with the customer's own words in quotes>"}],
   "conflicts": ["<short strings>"],
+  "signals": {"urgent": true | false, "vague_dates": true | false, "special_handling": true | false, "multiple_shipments": true | false, "references_attachment": true | false},
+  "customer_questions": ["<each direct question the customer asks that you cannot answer from the email, as a short phrase>"],
   "flags": ["SUSPICIOUS" | "PROMPT_INJECTION" | "MIXED_INTENT"],
   "recommended_action": "DRAFT_ACKNOWLEDGEMENT" | "ASK_FOR_INFORMATION" | "VERIFY_INTERNALLY" | "FLAG_FOR_REVIEW" | "NO_REPLY_NEEDED",
   "draft_reply": {"subject": "<reply subject>", "body": "<full reply text>"}
@@ -160,7 +168,7 @@ def _skill_block(skill: dict) -> list[str]:
 
 def build_system_prompt() -> str:
     """Single-call mode: rules + all six skills in full."""
-    parts = [_INTRO + _HARD_RULES + _HOW_SINGLE + _format(), "SKILLS"]
+    parts = [_INTRO + _HARD_RULES + _HOW_SINGLE + _format(), "SHARED PLAYBOOK", load_shared(), "", "SKILLS"]
     for skill in load_skills():
         parts += _skill_block(skill)
     return "\n".join(parts)
@@ -177,7 +185,7 @@ def build_router_prompt() -> str:
 def build_skill_prompt(category: str) -> str:
     """Stage 2: rules + ONLY the chosen skill's full instructions."""
     skill = get_skill(category)
-    parts = [_INTRO + _HARD_RULES + _HOW_SKILL.format(category=category) + _format(), "SKILL"]
+    parts = [_INTRO + _HARD_RULES + _HOW_SKILL.format(category=category) + _format(), "SHARED PLAYBOOK", load_shared(), "", "SKILL"]
     if skill:
         parts += _skill_block(skill)
     return "\n".join(parts)
