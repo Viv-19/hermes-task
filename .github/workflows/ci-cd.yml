@@ -1,0 +1,83 @@
+name: CI/CD
+
+# Every push / pull request runs the tests.
+# A push to main that passes the tests is deployed to Render, and the job then waits until the
+# new commit is actually live (so a red run means "the deploy did not work").
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-cd-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run tests (mock mode, no API key needed)
+        run: python -m pytest -q
+
+  deploy:
+    name: Deploy to Render
+    needs: test
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Trigger the Render deploy
+        id: trigger
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "$HOOK" ]; then
+            echo "::warning::Secret RENDER_DEPLOY_HOOK_URL is not set, so nothing was deployed. See README > Deploy."
+            exit 0
+          fi
+          case "$HOOK" in *\?*) sep="&" ;; *) sep="?" ;; esac
+          curl -fsS -X POST "${HOOK}${sep}ref=${GITHUB_SHA}" -o /dev/null
+          echo "triggered=true" >> "$GITHUB_OUTPUT"
+          echo "Deploy of ${GITHUB_SHA::7} requested."
+
+      - name: Wait until the new version is live
+        if: steps.trigger.outputs.triggered == 'true'
+        env:
+          APP_URL: ${{ vars.RENDER_URL }}
+        run: |
+          if [ -z "$APP_URL" ]; then
+            echo "::notice::Repository variable RENDER_URL is not set, so the live check was skipped."
+            exit 0
+          fi
+          want="${GITHUB_SHA::7}"
+          for i in $(seq 1 40); do
+            body=$(curl -fsS --max-time 25 "${APP_URL%/}/api/health" 2>/dev/null || true)
+            ok=$(printf '%s' "$body" | jq -r '.ok // false' 2>/dev/null || echo false)
+            commit=$(printf '%s' "$body" | jq -r '.commit // ""' 2>/dev/null || echo "")
+            echo "check $i: ok=$ok live-commit=${commit:-none} (want $want)"
+            if [ "$ok" = "true" ] && { [ -z "$commit" ] || [ "$commit" = "$want" ]; }; then
+              echo "The new version is live."
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "::error::The new version did not become healthy within about 10 minutes. Check the Render logs."
+          exit 1
